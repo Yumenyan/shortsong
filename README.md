@@ -1,7 +1,7 @@
-# song_data — OCT Medley 配信リポジトリ
+# shortsong — OCT Medley 配信リポジトリ
 
 ```
-song_data/
+shortsong/
 ├─ songs/                         ← 楽曲登録で書き出した .oct8 を置くだけ
 ├─ tools/build-catalog.mjs        ← カタログ生成スクリプト（Actions が実行）
 ├─ .github/workflows/build-catalog.yml
@@ -12,7 +12,7 @@ song_data/
 1. このフォルダの中身をリポジトリにコミット＆プッシュ
 2. GitHub のリポジトリ → **Settings → Pages → Build and deployment → Source** を **GitHub Actions** に変更
 3. **Actions** タブで「Build OCT catalog & deploy Pages」が緑になれば完了
-   - 公開先：`https://yumenyan.github.io/song_data/`
+   - 公開先：`https://yumenyan.github.io/shortsong/`
 4. 暗号キーを独自に変えた場合のみ：Settings → Secrets and variables → Actions に `OCT_PASSPHRASE` を登録
 
 ## ふだんの運用
