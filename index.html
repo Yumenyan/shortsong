@@ -7,18 +7,18 @@
 <meta name="theme-color" content="#100b0a">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Shippori+Mincho:wght@500;600;700&display=swap" rel="stylesheet">
+<link id="gf" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#21130c; --wall:#2e1b11; --wall-2:#3a2316;
   --velvet:#6b1420; --velvet-d:#3a0a11; --carpet:#5c121b;
-  --gold:#b8945c; --gold-b:#d9bf8c; --gold-d:#7c5f37;
+  --gold:#c9a66c; --gold-b:#eed6a2; --gold-d:#8e7044;
   --line:rgba(201,170,120,.17); --line-s:rgba(201,170,120,.34);
-  --ivory:#f1e8d8; --ivory-2:#d6c9b2; --mute:#a3937b; --faint:#6d5d4a;
+  --ivory:#fffaf0; --ivory-2:#f0e5d2; --mute:#cfc1a9; --faint:#9c8c75;
   --warn:#c4655a; --brand:#ff5a5a;
   --wood-v:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='520' height='900'><filter id='w'><feTurbulence type='fractalNoise' baseFrequency='0.11 0.0032' numOctaves='4' seed='11'/><feColorMatrix values='0 0 0 0 0.05  0 0 0 0 0.02  0 0 0 0 0.01  0 0 0 1.9 -0.62'/></filter><rect width='100%' height='100%' filter='url(%23w)'/></svg>"); --wood-h:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='300'><filter id='w'><feTurbulence type='fractalNoise' baseFrequency='0.0032 0.12' numOctaves='4' seed='5'/><feColorMatrix values='0 0 0 0 0.05  0 0 0 0 0.02  0 0 0 0 0.01  0 0 0 1.9 -0.62'/></filter><rect width='100%' height='100%' filter='url(%23w)'/></svg>"); --fabric:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='f'><feTurbulence type='fractalNoise' baseFrequency='0.9 0.6' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.12  0 0 0 0 0.01  0 0 0 0 0.02  0 0 0 1.2 -0.35'/></filter><rect width='100%' height='100%' filter='url(%23f)'/></svg>");
-  --font:"Cormorant Garamond","Shippori Mincho","Hiragino Mincho ProN","Yu Mincho","YuMincho","Noto Serif JP",serif;
-  --font-jp:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho","YuMincho","Noto Serif JP",serif;
+  --font:"Cormorant Garamond","Zen Kaku Gothic New","Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","YuGothic","Meiryo",sans-serif;
+  --font-jp:var(--font);
   --bar-h:96px;
 }
 *{box-sizing:border-box}
@@ -32,7 +32,7 @@ body{
     var(--wood-v),
     linear-gradient(90deg, #2a170e, #352015 25%, #301c12 55%, #38221a 80%, #2a170e);
   background-attachment:fixed;
-  font-feature-settings:"onum" 1, "liga" 1;
+  font-feature-settings:"lnum" 1, "liga" 1; font-variant-numeric:lining-nums;
   -webkit-font-smoothing:antialiased; overflow:hidden;
 }
 ::selection{background:rgba(201,164,92,.35)}
@@ -140,7 +140,7 @@ input[type=range].rng:hover::-webkit-slider-thumb{box-shadow:0 0 0 6px rgba(201,
 .row{display:grid;grid-template-columns:44px 46px minmax(0,1fr) auto 38px 38px;align-items:center;gap:14px;padding:9px 10px;border-radius:6px;cursor:pointer;position:relative;transition:background .2s}
 .row:hover{background:rgba(201,164,92,.055)}
 .row + .row{border-top:1px solid rgba(201,164,92,.07)}
-.row .no{font-size:17px;color:var(--mute);text-align:right;font-variant-numeric:oldstyle-nums tabular-nums}
+.row .no{font-size:17px;color:var(--ivory-2);text-align:right;font-variant-numeric:lining-nums tabular-nums}
 .row .th{width:46px;height:46px;border-radius:3px;object-fit:cover;box-shadow:0 0 0 1px var(--line-s);background:#241815}
 .row .main{display:flex;align-items:baseline;gap:10px;min-width:0}
 .row .tt{min-width:0;flex:0 1 auto;overflow:hidden}
@@ -213,7 +213,7 @@ input[type=range].rng:hover::-webkit-slider-thumb{box-shadow:0 0 0 6px rgba(201,
 .play:hover{transform:scale(1.04)}
 .play svg{width:20px;height:20px}
 .play.lg{width:70px;height:70px}.play.lg svg{width:26px;height:26px}
-.seek{display:flex;align-items:center;gap:12px;width:100%;max-width:560px;font-size:13px;color:var(--mute);font-variant-numeric:tabular-nums}
+.seek{display:flex;align-items:center;gap:12px;width:100%;max-width:560px;font-size:14.5px;color:var(--mute);font-variant-numeric:tabular-nums}
 .seek .tm{min-width:40px;text-align:center}
 .side{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
 .side input.rng.vol{width:72px;flex:none}
@@ -335,10 +335,10 @@ kbd{font-family:var(--font);font-size:13px;border:1px solid var(--line-s);border
 /* ===== hall theme overrides (wood / carpet / matte brass) ===== */
 header.top{background:linear-gradient(180deg,rgba(20,11,6,.55),rgba(20,11,6,.35)),var(--wood-h),linear-gradient(180deg,#3d2517,#2c1a10);border-bottom:1px solid rgba(0,0,0,.5);box-shadow:0 1px 0 rgba(216,186,130,.22),0 8px 24px rgba(0,0,0,.35)}
 .brand .t1{font-weight:600}
-.brand .t2{font-weight:600;color:#b9a587}
+.brand .t2{font-weight:600;color:var(--mute)}
 nav.tabs button{font-weight:600;color:var(--ivory-2)}
 .eyebrow{font-weight:600;font-size:12.5px;color:var(--gold-b)}
-.lbl{font-weight:600;font-size:12px;color:#b3a28a}
+.lbl{font-weight:600;font-size:12px;color:var(--mute)}
 .lede{font-weight:500}
 .muted{color:var(--mute)}
 h1.title{font-weight:500;text-shadow:0 2px 14px rgba(0,0,0,.45)}
@@ -351,7 +351,7 @@ h2.sec{font-weight:500}
 .row .name{font-weight:600}
 .row .en{font-weight:500}
 .row .comp{font-weight:500}
-.row .meta{color:#b3a38b}
+.row .meta{color:var(--ivory-2);font-size:15.5px}
 .row:hover{background:rgba(255,220,170,.05)}
 .row.playing{background:linear-gradient(90deg,rgba(120,26,36,.40),rgba(120,26,36,.06))}
 .row .th{box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 0 2px rgba(201,170,120,.25)}
@@ -363,7 +363,7 @@ h2.sec{font-weight:500}
 .np .a{font-weight:600}
 .np .b{font-weight:500}
 .np .c{font-weight:600}
-.seek{color:#b3a38b;font-weight:600}
+.seek{color:var(--ivory-2);font-weight:600}
 .stage{background:radial-gradient(900px 560px at 50% -5%,rgba(255,200,140,.16),transparent 60%),linear-gradient(180deg,rgba(28,15,9,.93),rgba(20,10,6,.97)),var(--wood-v)}
 .arch{background:linear-gradient(180deg,rgba(0,0,0,.15),rgba(0,0,0,.35)),var(--wood-v),linear-gradient(90deg,#4a2c1b,#5a3622,#4a2c1b);border:1px solid rgba(0,0,0,.6);box-shadow:0 0 0 1px rgba(201,170,120,.25),0 30px 70px rgba(0,0,0,.55);padding:18px}
 .arch::before{inset:12px;border-color:rgba(201,170,120,.4)}
@@ -417,6 +417,11 @@ h2.sec{font-weight:500}
 .modrow .big{display:block;font-size:20px;font-weight:600;margin:2px 0 6px;font-variant-numeric:lining-nums}
 .modctl{display:flex;gap:10px;align-items:center}
 .modctl .btn{flex:none;padding:5px 12px}
+/* font preview */
+.fontprev{border:1px solid var(--line);border-radius:6px;padding:12px 16px;background:rgba(10,5,3,.3)}
+.fontprev .a{font-size:20px;font-weight:600}
+.fontprev .b{font-size:18px;font-style:italic;color:var(--ivory-2)}
+.fontprev .c{font-size:14px;color:var(--mute);margin-top:4px}
 /* graphic equalizer */
 .geq{display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;padding:12px 10px 6px;border:1px solid var(--line);border-radius:8px;background:rgba(10,5,3,.35)}
 .geq .band{display:flex;flex-direction:column;align-items:center;gap:6px;width:46px}
@@ -637,7 +642,7 @@ const DEFAULTS = {
   remoteMode: 'pages', pagesUrl: '', exportCatalog: false, settingsVer: 2, repo: 'Yumenyan/shortsong', branch: 'main', folder: 'song', catalog: 'catalog.oct8c', customBase: '', passphrase: '',
   tailTrim: 'tail', headTrim: true, normalize: true, transition: 'gapless', crossfade: 2, gap: 1, prefetch: 3,
   explicit: 'exclude', cacheMB: 300, eq: true, eqIntensity: 0.5, watermark: true,
-  modRate: 1, modSemi: 0, modLinked: false, eqOn: true, eqPreset: 'flat', eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], reverb: 0,
+  fontJa: 'zenkaku', fontEn: 'cormorant', uiScale: 1, modRate: 1, modSemi: 0, modLinked: false, eqOn: true, eqPreset: 'flat', eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], reverb: 0,
   volume: 0.85, muted: false, repeat: 'all', shuffle: false, sort: 'no'
 };
 const EQ_FREQS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -653,6 +658,34 @@ const EQ_PRESETS = {
   night: ['夜間（小音量）', [4.5, 3.5, 2, 0.5, -0.5, -0.5, 0, 1.5, 2.5, 3]],
   custom: ['カスタム', null]
 };
+const FONTS_JA = {
+  zenkaku: ['ゴシック（Zen Kaku Gothic）', '"Zen Kaku Gothic New"', 'Zen+Kaku+Gothic+New:wght@400;500;700', 'g'],
+  notosans: ['ゴシック（Noto Sans JP）', '"Noto Sans JP"', 'Noto+Sans+JP:wght@400;500;700', 'g'],
+  zenmaru: ['丸ゴシック（Zen Maru Gothic）', '"Zen Maru Gothic"', 'Zen+Maru+Gothic:wght@400;500;700', 'g'],
+  sysgothic: ['ゴシック（端末の標準）', '', '', 'g'],
+  shippori: ['明朝（しっぽり明朝）', '"Shippori Mincho"', 'Shippori+Mincho:wght@500;600;700', 'm'],
+  notoserif: ['明朝（Noto Serif JP）', '"Noto Serif JP"', 'Noto+Serif+JP:wght@400;500;700', 'm'],
+  sysmincho: ['明朝（端末の標準）', '', '', 'm']
+};
+const FONTS_EN = {
+  cormorant: ['明朝体・クラシック（Cormorant Garamond）', '"Cormorant Garamond"', 'Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600'],
+  ebgaramond: ['明朝体・読みやすい（EB Garamond）', '"EB Garamond"', 'EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500'],
+  playfair: ['明朝体・コントラスト強め（Playfair Display）', '"Playfair Display"', 'Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500'],
+  lora: ['明朝体・太め（Lora）', '"Lora"', 'Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500'],
+  montserrat: ['ゴシック体（Montserrat）', '"Montserrat"', 'Montserrat:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500'],
+  lato: ['ゴシック体（Lato）', '"Lato"', 'Lato:ital,wght@0,400;0,700;1,400'],
+  same: ['日本語フォントと同じ', '', '']
+};
+function applyFonts() {
+  const s = Settings.s, ja = FONTS_JA[s.fontJa] || FONTS_JA.zenkaku, en = FONTS_EN[s.fontEn] || FONTS_EN.cormorant;
+  const fb = ja[3] === 'm' ? '"Hiragino Mincho ProN","Yu Mincho","YuMincho",serif' : '"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","YuGothic","Meiryo",sans-serif';
+  const stack = [en[1], ja[1], fb].filter(Boolean).join(',');
+  const root = document.documentElement.style; root.setProperty('--font', stack); root.setProperty('--font-jp', stack);
+  const fam = [en[2], ja[2]].filter(Boolean).map(f => 'family=' + f).join('&');
+  const link = document.getElementById('gf'); if (link) { if (fam) link.href = `https://fonts.googleapis.com/css2?${fam}&display=swap`; else link.removeAttribute('href'); }
+  document.documentElement.style.zoom = s.uiScale && s.uiScale !== 1 ? s.uiScale : '';
+  if (typeof EQ !== 'undefined' && EQ.cv) setTimeout(() => { EQ.size(); Studio.drawWave(); }, 60);
+}
 const Settings = {
   s: { ...DEFAULTS },
   async load() { const v = await DB.get('kv', 'settings'); if (v) { Object.assign(this.s, v); if (!(v.settingsVer >= 2)) { if (this.s.remoteMode === 'github') this.s.remoteMode = 'pages'; this.s.settingsVer = 2; } } if (!Array.isArray(this.s.eqGains) || this.s.eqGains.length !== EQ_FREQS.length) this.s.eqGains = EQ_FREQS.map(() => 0); else this.s.eqGains = this.s.eqGains.slice(); },
@@ -2473,7 +2506,12 @@ const SettingsView = {
         row('', null, h('button', { class: 'btn', onclick: async () => { await Cache.clearTemp(); this.update(); toast('一時キャッシュを消去しました'); } }, '一時キャッシュを消去'), h('button', { class: 'btn danger', onclick: async () => { if (await confirmDlg('すべて消去', 'オフライン保存した曲・ローカル曲のデータも含め、端末内の音声データをすべて消去します。', '消去', 'danger')) { await Cache.clearAll(); for (const sg of Lib.list().filter(x => x.source === 'local')) await Lib.remove(sg.id); this.update(); UI.render(); toast('消去しました'); } } }, 'すべての音声データを消去'))),
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('h3', null, 'Appearance', h('small', null, '表示'))),
         row('背景のスペクトラム表示', '再生中に背景でうっすら揺れるグラフ', sw('eq'), h('input', { type: 'range', class: 'rng', min: 0, max: 100, value: s.eqIntensity * 100, style: { width: '160px' }, oninput: e => { Settings.s.eqIntensity = e.target.value / 100; setP(e.target); }, onchange: () => Settings.save() })),
-        row('ロゴの透かし', null, sw('watermark', () => $('#watermark').classList.toggle('off', !Settings.s.watermark)))),
+        row('ロゴの透かし', null, sw('watermark', () => $('#watermark').classList.toggle('off', !Settings.s.watermark))),
+        row('日本語のフォント', '日本語の部分に使います', h('select', { class: 'field', onchange: e => { Settings.set('fontJa', e.target.value); applyFonts(); } }, Object.entries(FONTS_JA).map(([k, [l]]) => h('option', { value: k, selected: s.fontJa === k }, l)))),
+        row('英語のフォント', 'タイトルの英語名・数字・アルファベットに使います', h('select', { class: 'field', onchange: e => { Settings.set('fontEn', e.target.value); applyFonts(); } }, Object.entries(FONTS_EN).map(([k, [l]]) => h('option', { value: k, selected: s.fontEn === k }, l)))),
+        row('文字の大きさ', '画面全体の表示倍率', h('select', { class: 'field', onchange: e => { Settings.set('uiScale', +e.target.value); applyFonts(); } }, [[1, '標準'], [1.1, '大きめ（110%）'], [1.2, '特大（120%）'], [0.9, '小さめ（90%）']].map(([k, l]) => h('option', { value: k, selected: +s.uiScale === k }, l)))),
+        row('見本', null, h('div', { class: 'fontprev' }, h('div', { class: 'a' }, '超特急みたいなアイドル'), h('div', { class: 'b' }, 'Idols like Bullet Train'), h('div', { class: 'c' }, '♩ = 150 · E maj. · 4/4 · 作曲 御葉'))),
+        row('', null, h('button', { class: 'btn ghost', onclick: () => { Object.assign(Settings.s, { fontJa: 'zenkaku', fontEn: 'cormorant', uiScale: 1 }); Settings.save(); applyFonts(); $('#v-settings').replaceChildren(); SettingsView.build(); } }, '表示設定を標準に戻す'))),
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('h3', null, 'Shortcuts', h('small', null, 'キーボード'))),
         h('div', { class: 'keys' }, [['再生 / 一時停止', 'Space'], ['5秒 進む / 戻る', '→ / ←'], ['次の曲 / 前の曲', 'Shift + → / ←'], ['音量', '↑ / ↓'], ['シャッフル', 'S'], ['リピート切替', 'L'], ['ミュート', 'M'], ['ステージ表示', 'F'], ['テンポ・キー変更', 'T'], ['検索', '/']].map(([a, b]) => h('div', null, h('span', null, a), h('kbd', null, b))))),
       h('div', { class: 'panel' }, h('div', { class: 'about' }, h('span', { html: '<svg viewBox="0 0 800 800"><use href="#logo-letters" style="color:#111"/><use href="#logo-rings"/></svg>' }),
@@ -2496,6 +2534,7 @@ const SettingsView = {
   const demos = Lib.list().filter(m => /^demo-\d+$/.test(m.id) && (m.tags || []).includes('demo'));
   for (const m of demos) { await DB.del('songs', m.id); Lib.songs.delete(m.id); await Cache.remove(m.id); }
   for (const p of Playlists.list()) { const n = p.songIds.filter(id => !demos.some(d => d.id === id)); if (n.length !== p.songIds.length) { p.songIds = n; await Playlists.save(p); } }
+  applyFonts();
   $('#watermark').classList.toggle('off', !Settings.s.watermark);
   EQ.init(); UI.init();
   if (navigator.onLine !== false) Lib.refreshRemote({ quiet: true });
