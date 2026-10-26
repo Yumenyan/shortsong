@@ -1,16 +1,25 @@
 // OCT Medley — catalog builder (GitHub Actions 用)
 // songs/*.oct8 を読み、暗号化カタログ catalog.oct8c と index.json を _site/ に生成する。
 // カタログは毎回ファイルから作り直すため、古い情報や削除済みの曲が残ることはない。
-import { readdir, readFile, mkdir, writeFile, copyFile, stat } from 'node:fs/promises';
+import { readdir, readFile, mkdir, writeFile, copyFile, stat, cp, rm } from 'node:fs/promises';
 import { createHash, webcrypto } from 'node:crypto';
 import path from 'node:path';
 
 const subtle = (globalThis.crypto || webcrypto).subtle;
 const getRandomValues = a => (globalThis.crypto || webcrypto).getRandomValues(a);
-const SONG_DIR = process.env.OCT_SONG_DIR || 'songs';
 const OUT = process.env.OCT_OUT || '_site';
 const PASS = process.env.OCT_PASSPHRASE || 'AudioCre8::OCT-Medley::Original-Chime-Tracks::v1';
 const APP_HTML = process.env.OCT_APP_HTML || 'oct-medley.html';
+const EXCLUDE = new Set(['.git', '.github', 'tools', 'node_modules', OUT]);
+// 曲フォルダ：環境変数 → songs → song → .oct8 が入っている最初のフォルダ
+async function findSongDir() {
+  if (process.env.OCT_SONG_DIR) return process.env.OCT_SONG_DIR;
+  const has = async d => (await readdir(d).catch(() => [])).some(f => /\.oct8$/i.test(f));
+  for (const d of ['songs', 'song']) if (await has(d)) return d;
+  for (const e of await readdir('.', { withFileTypes: true })) if (e.isDirectory() && !EXCLUDE.has(e.name) && await has(e.name)) return e.name;
+  return 'songs';
+}
+const SONG_DIR = await findSongDir();
 const TE = new TextEncoder(), TD = new TextDecoder();
 const MAGIC_SONG = [0xAC, 0xC8, 0x0C, 0x7E], MAGIC_CAT = [0xAC, 0xC8, 0xCA, 0x7A];
 const SONG_HDR = 72, SIMPLE_HDR = 40;
@@ -45,12 +54,15 @@ const gitSha = u8 => createHash('sha1').update(`blob ${u8.length}\0`).update(u8)
 const LITE = ['id', 'no', 'title', 'titleEn', 'composer', 'arranger', 'tags', 'desc', 'explicit', 'bpm', 'bpmSegments', 'meter', 'meterSegments', 'key', 'keySegments', 'downbeat', 'duration', 'trimStart', 'trimTail', 'mime', 'thumbMime', 'thumbS', 'created', 'updated', 'fmt'];
 
 const files = (await readdir(SONG_DIR).catch(() => [])).filter(f => /\.oct8$/i.test(f)).sort();
+// リポジトリ内のファイル（index.html など既存のサイト）をそのまま公開物に含める
+await rm(OUT, { recursive: true, force: true }); await mkdir(OUT, { recursive: true });
+for (const e of await readdir('.', { withFileTypes: true })) { if (EXCLUDE.has(e.name)) continue; await cp(e.name, path.join(OUT, e.name), { recursive: true }); }
 await mkdir(path.join(OUT, SONG_DIR), { recursive: true });
+console.log(`song folder: ${SONG_DIR}/ (${files.length} files)`);
 const songs = [], issues = [], byId = new Map(), byNo = new Map();
 const warn = (file, msg) => { issues.push({ file, msg }); console.log(`::warning file=${SONG_DIR}/${file}::${msg}`); };
 for (const file of files) {
   const u8 = new Uint8Array(await readFile(path.join(SONG_DIR, file)));
-  await copyFile(path.join(SONG_DIR, file), path.join(OUT, SONG_DIR, file));
   let lite; try { lite = await readLite(u8); } catch (e) { warn(file, '読み込めません: ' + e.message + '（暗号キーが違う可能性）'); continue; }
   const e = { file, sha: gitSha(u8), size: u8.length }; for (const k of LITE) if (lite[k] !== undefined) e[k] = lite[k];
   if (!e.title || !String(e.title).trim()) warn(file, 'タイトルが空です');
@@ -63,6 +75,6 @@ for (const file of files) {
 songs.sort((a, b) => (a.no ?? 1e9) - (b.no ?? 1e9) || String(a.id).localeCompare(String(b.id)));
 await writeFile(path.join(OUT, 'catalog.oct8c'), await buildCatalog(songs));
 await writeFile(path.join(OUT, 'index.json'), JSON.stringify({ format: 'oct8-index', updated: new Date().toISOString(), count: songs.length, folder: SONG_DIR, files: songs.map(s => ({ file: s.file, id: s.id, sha: s.sha, size: s.size })), issues }, null, 1));
-if (await stat(APP_HTML).catch(() => null)) await copyFile(APP_HTML, path.join(OUT, 'index.html'));
+if (!(await stat(path.join(OUT, 'index.html')).catch(() => null)) && await stat(APP_HTML).catch(() => null)) await copyFile(APP_HTML, path.join(OUT, 'index.html'));
 await writeFile(path.join(OUT, '.nojekyll'), '');
 console.log(`catalog: ${songs.length} songs, ${issues.length} issue(s)`);
