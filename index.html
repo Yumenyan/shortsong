@@ -634,7 +634,7 @@ const DB = {
 
 /* ---------------- settings & state ---------------- */
 const DEFAULTS = {
-  remoteMode: 'pages', pagesUrl: '', exportCatalog: false, settingsVer: 2, repo: 'Yumenyan/song_data', branch: 'main', folder: 'songs', catalog: 'catalog.oct8c', customBase: '', passphrase: '',
+  remoteMode: 'pages', pagesUrl: '', exportCatalog: false, settingsVer: 2, repo: 'Yumenyan/shortsong', branch: 'main', folder: 'songs', catalog: 'catalog.oct8c', customBase: '', passphrase: '',
   tailTrim: 'tail', headTrim: true, normalize: true, transition: 'gapless', crossfade: 2, gap: 1, prefetch: 3,
   explicit: 'exclude', cacheMB: 300, eq: true, eqIntensity: 0.5, watermark: true,
   modRate: 1, modSemi: 0, modLinked: false, eqOn: true, eqPreset: 'flat', eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], reverb: 0,
@@ -2393,10 +2393,10 @@ const SettingsView = {
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('h3', null, 'Remote', h('small', null, 'データ取得元'))),
         row('取得方式', 'GitHub Pages（推奨）：回数制限なし。GitHub Actions が生成するカタログを読みます', sel('remoteMode', [['pages', 'GitHub Pages（推奨）'], ['github', 'GitHub（raw＋API・回数制限あり）'], ['custom', 'カスタムURL']], () => { Remote.activeBase = null; this.update(); })),
         h('div', { id: 'set-gh' },
-          row('リポジトリ', 'owner/repo（公開リポジトリ）', txt('repo', 'Yumenyan/song_data')),
+          row('リポジトリ', 'owner/repo（公開リポジトリ）', txt('repo', 'Yumenyan/shortsong')),
           row('ブランチ', null, txt('branch', 'main', '160px')),
           row('曲フォルダ', 'このフォルダの .oct8 を自動で認識します', txt('folder', 'songs', '160px')),
-          h('div', { id: 'set-pages' }, row('Pages の URL', '空欄なら https://（ユーザー名）.github.io/（リポジトリ名）/ を使います。Pages が未公開の間は GitHub から直接読みます', txt('pagesUrl', 'https://yumenyan.github.io/song_data/', '360px')))),
+          h('div', { id: 'set-pages' }, row('Pages の URL', '空欄なら https://（ユーザー名）.github.io/（リポジトリ名）/ を使います。Pages が未公開の間は GitHub から直接読みます', txt('pagesUrl', 'https://yumenyan.github.io/shortsong/', '360px')))),
         h('div', { id: 'set-custom' }, row('ベースURL', '例：https://example.com/oct/（CORS許可が必要）', txt('customBase', 'https://…', '360px'))),
         row('カタログのパス', 'ベースURLからの相対パス', txt('catalog', 'catalog.oct8c', '200px')),
         row('暗号キー', '空欄なら内蔵キー。変更すると登録・再生の両方で同じキーが必要です', h('input', { class: 'field', type: 'password', value: s.passphrase, placeholder: '（内蔵キー）', style: { width: '260px' }, onchange: e => { Settings.set('passphrase', e.target.value); Engine.decoded.clear(); } })),
