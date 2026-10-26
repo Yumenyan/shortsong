@@ -781,7 +781,19 @@ const Format = {
     let off = 0; const songs = files.map(f => { const r = { id: f.id, off, len: f.u8.length }; off += f.u8.length; return r; });
     return this.buildSimple(MAGIC.pack, 'oct8/pack', { format: 'oct8pl', version: 1, name, desc, created: new Date().toISOString(), songs }, files.map(f => f.u8));
   },
-  async readPack(u8) { const { obj, dataStart } = await this.readSimple(u8, MAGIC.pack, 'oct8/pack'); return { ...obj, files: obj.songs.map(s => ({ id: s.id, u8: u8.slice(dataStart + s.off, dataStart + s.off + s.len) })) }; }
+  async readPack(u8) { const { obj, dataStart } = await this.readSimple(u8, MAGIC.pack, 'oct8/pack'); return { ...obj, files: obj.songs.map(s => ({ id: s.id, u8: u8.slice(dataStart + s.off, dataStart + s.off + s.len) })) }; },
+  /* .oct8pl v2：大きなファイルでもメモリに全部載せないよう Blob で組み立て・読み出し */
+  async buildPackBlob(manifest, files /* [{id,u8}] */) {
+    let off = 0; const songs = files.map(f => { const r = { id: f.id, off, len: f.u8.length }; off += f.u8.length; return r; });
+    const head = await this.buildSimple(MAGIC.pack, 'oct8/pack', { format: 'oct8pl', version: 2, created: new Date().toISOString(), app: 'OCT Medley ' + APP_VERSION, ...manifest, songs }, null);
+    return new Blob([head, ...files.map(f => f.u8)], { type: 'application/octet-stream' });
+  },
+  async openPackBlob(blob) {
+    const h0 = new Uint8Array(await blob.slice(0, SIMPLE_HDR).arrayBuffer()); if (!isMagic(h0, MAGIC.pack)) throw new Error('.oct8pl ではありません');
+    const hd = h0.slice(); maskInPlace(hd, 4, SIMPLE_HDR); const len = dv(hd).getUint32(36);
+    const { obj, dataStart } = await this.readSimple(new Uint8Array(await blob.slice(0, SIMPLE_HDR + len).arrayBuffer()), MAGIC.pack, 'oct8/pack');
+    return { ...obj, read: async s => new Uint8Array(await blob.slice(dataStart + s.off, dataStart + s.off + s.len).arrayBuffer()) };
+  }
 };
 async function gitBlobSha(u8) { const head = TE.encode(`blob ${u8.length}\0`); const all = new Uint8Array(head.length + u8.length); all.set(head); all.set(u8, head.length); return hex(await crypto.subtle.digest('SHA-1', all)); }
 
@@ -911,14 +923,17 @@ const Lib = {
       for (const [id, m] of remoteNow) {
         const ex = this.songs.get(id); const fi = State.fileIndex[id];
         // リモートを正とする：端末内の古いコピー（試聴用に追加した曲・以前の版）は破棄
-        if (fi && (ex?.source === 'local' || (m.sha && fi.sha && fi.sha !== m.sha) || (m.sha && ex?.sha && ex.sha !== m.sha))) { const pin = fi.pinned; await Cache.remove(id); Engine.forget(id); if (pin) (this._repin = this._repin || []).push(id); }
+        if (fi && m.sha && fi.sha !== m.sha) {
+          // 中身が違う（以前の版・試聴用コピー）。オフライン保存分は新しい版を取得できるまで古いデータを残す
+          Engine.forget(id); if (fi.pinned) (this._repin = this._repin || []).push(id); else await Cache.remove(id);
+        }
         const rec = { ...m, source: 'remote', addedAt: ex?.addedAt || Date.now() }; delete rec.orphan; toPut.push(rec);
       }
       for (const s of known) if (!remoteNow.has(s.id)) { if (State.fileIndex[s.id]?.pinned) { toPut.push({ ...s, orphan: true }); } else toDel.push(s.id); }
       await DB.putMany('songs', toPut); await DB.delMany('songs', toDel);
       toPut.forEach(s => this.songs.set(s.id, s)); toDel.forEach(id => this.songs.delete(id));
       this.lastRefresh = Date.now(); DB.put('kv', this.lastRefresh, 'lastRefresh');
-      if (this._repin?.length) { const ids = this._repin; this._repin = null; setTimeout(() => Offline.saveMany(ids, '更新された曲'), 500); }
+      if (this._repin?.length) { const ids = this._repin; this._repin = null; setTimeout(() => Offline.refetch(ids), 500); }
       if (!quiet) toast(`演目を更新しました（リモート ${remoteNow.size} 曲）`);
       return true;
     } catch (e) {
@@ -929,14 +944,11 @@ const Lib = {
     let n = 0, last = null;
     for (const f of files) {
       try {
+        const head = new Uint8Array(await f.slice(0, 4).arrayBuffer());
+        if (isMagic(head, MAGIC.pack)) { const r = await this.importPack(f); n += r.songs; continue; }
         const u8 = new Uint8Array(await f.arrayBuffer());
         if (isMagic(u8, MAGIC.song)) { last = await this.addLocalSong(u8, f.name); n++; }
-        else if (isMagic(u8, MAGIC.pack)) {
-          const pk = await Format.readPack(u8); const ids = [];
-          for (const s of pk.files) { const m = await this.addLocalSong(s.u8, s.id + '.oct8'); ids.push(m.id); n++; }
-          const pl = { id: uid(), name: pk.name || f.name.replace(/\.oct8pl$/i, ''), desc: pk.desc || '', songIds: ids, explicit: 'global', created: Date.now(), updated: Date.now() };
-          await Playlists.save(pl); toast(`再生リスト「${pl.name}」を読み込みました`);
-        } else if (isMagic(u8, MAGIC.cat)) { toast('カタログファイルは設定のリモートから読み込まれます', true); }
+        else if (isMagic(u8, MAGIC.cat)) { toast('カタログファイルは設定のリモートから読み込まれます', true); }
         else if ((f.type || '').startsWith('audio/') || /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|webm)$/i.test(f.name)) {
           const title = f.name.replace(/\.[^.]+$/, '');
           const lite = { id: 'local-' + uid(), title, titleEn: '', composer: '', explicit: false, mime: f.type || 'audio/mpeg', created: Date.now(), fmt: 1 };
@@ -947,13 +959,31 @@ const Lib = {
     if (n) toast(`${n} 曲をローカルに追加しました`);
     UI.refresh(); return last;
   },
-  async addLocalSong(u8, name) {
-    const lite = await Format.readLite(u8);
-    const ex = this.songs.get(lite.id);
-    const meta = { ...pickLite(lite), source: ex?.source === 'remote' ? 'remote' : 'local', file: ex?.file || name, sha: ex?.sha, size: u8.length, addedAt: ex?.addedAt || Date.now() };
-    if (ex?.source === 'remote' && ex.sha) { const sha = await gitBlobSha(u8); if (sha !== ex.sha) meta.source = 'local'; }
+  async importPack(file) {
+    Progress.start('再生データを読み込み中', 1);
+    try {
+      const pk = await Format.openPackBlob(file); const total = pk.songs.length; Progress.total = total; let n = 0; const map = new Map();
+      for (const s of pk.songs) { if (Progress.cancelled) break; try { const m = await this.addLocalSong(await pk.read(s), s.id + '.oct8', { keepRemoteMeta: true }); map.set(s.id, m.id); } catch (e) { console.warn(e); } Progress.set(++n); }
+      // 再生リスト（v1は1本、v2は複数）
+      const lists = pk.playlists?.length ? pk.playlists : [{ name: pk.name || file.name.replace(/\.oct8pl$/i, ''), desc: pk.desc || '', songIds: pk.songs.map(x => x.id), explicit: 'global' }];
+      const names = new Set(Playlists.list().map(p => p.name)); const made = [];
+      for (const l of lists) {
+        let name = l.name || '読み込んだ再生リスト'; if (names.has(name)) { let i = 2; while (names.has(`${name} (${i})`)) i++; name = `${name} (${i})`; } names.add(name);
+        const p = { id: uid(), name, desc: l.desc || '', songIds: (l.songIds || []).map(id => map.get(id) || id).filter(id => this.songs.has(id)), explicit: l.explicit || 'global', created: Date.now(), updated: Date.now() };
+        await Playlists.save(p); made.push(p);
+      }
+      if (pk.favs?.length) { pk.favs.forEach(id => State.favs.add(id)); State.saveFavs(); }
+      Progress.done(); UI.refresh();
+      dialog({ title: '読み込みました', body: h('div', null, h('p', null, `${map.size} 曲（音源を含む）を端末に保存しました。オフラインでもそのまま再生できます。`), h('p', null, '作成した再生リスト：' + made.map(p => `「${p.name}」`).join('、'))), actions: [{ label: '閉じる', value: null }, { label: '再生リストを開く', cls: 'gold', value: () => UI.go(made.length === 1 ? 'playlist:' + made[0].id : 'playlists') }] });
+      return { songs: 0 };
+    } catch (e) { Progress.done(); throw e; }
+  },
+  async addLocalSong(u8, name, { keepRemoteMeta = false } = {}) {
+    const lite = await Format.readLite(u8); const sha = await gitBlobSha(u8);
+    const ex = this.songs.get(lite.id); const same = ex?.source === 'remote' && ex.sha === sha;
+    const meta = same && keepRemoteMeta ? { ...ex } : { ...pickLite(lite), source: same ? 'remote' : 'local', file: ex?.file || name, sha: same ? ex.sha : undefined, size: u8.length, addedAt: ex?.addedAt || Date.now() };
     await DB.put('songs', meta); this.songs.set(meta.id, meta);
-    await Cache.store(meta.id, u8, true, meta.source === 'remote' ? meta.sha : 'local'); Engine.forget(meta.id);
+    await Cache.store(meta.id, u8, true, sha); Engine.forget(meta.id);
     return meta;
   },
   async remove(id) { await DB.del('songs', id); this.songs.delete(id); await Cache.remove(id); UI.refresh(); }
@@ -1556,7 +1586,8 @@ const UI = {
           h('button', { class: 'btn', onclick: () => { if (!ids.length) return; Settings.set('shuffle', true); Player.playFrom(ids, Math.floor(Math.random() * ids.length), '演目', { type: 'library' }); this.syncBar(); }, disabled: !ids.length }, icon('shuffle'), 'シャッフル'),
           h('button', { class: 'btn', onclick: e => menu(e.currentTarget, [
             { label: 'リモートから更新', icon: 'cloud', fn: () => Lib.refreshRemote() },
-            { label: 'ローカルファイルを開く…', icon: 'file', fn: () => $('#filepick').click() },
+            { label: 'ファイルを読み込む（.oct8pl / .oct8 / 音源）…', icon: 'upload', fn: () => $('#filepick').click() },
+            { label: '表示中の曲を .oct8pl で書き出す…', icon: 'down', fn: () => Offline.exportIds(ids, '演目') },
             '-',
             { label: '表示中の曲をすべてオフライン保存…', icon: 'pin', fn: () => Offline.saveMany(ids, '表示中の曲') }
           ]) }, icon('more'), 'その他'))),
@@ -1608,7 +1639,7 @@ const UI = {
   renderPlaylists() {
     const v = $('#v-playlists'); v.innerHTML = '';
     v.append(h('div', { class: 'hero' }, h('div', { class: 'grow' }, h('p', { class: 'eyebrow' }, 'Playlists'), h('h1', { class: 'title' }, 'Concert Programmes', h('span', { class: 'jp' }, '再生リスト')), h('p', { class: 'lede' }, '好きな曲を選んで、あなただけの演奏会を組み立てます。')),
-      h('button', { class: 'btn', onclick: () => $('#filepick').click() }, icon('file'), '.oct8pl を読み込む')));
+      h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } }, h('button', { class: 'btn gold', onclick: () => $('#filepick').click() }, icon('upload'), '再生リストを読み込む（.oct8pl）'), h('button', { class: 'btn', onclick: () => Offline.exportBackup() }, icon('down'), 'すべてバックアップ'))));
     const g = h('div', { class: 'grid' });
     g.append(h('div', { class: 'card new', onclick: async () => { const n = await promptDlg('新しい再生リスト', '名前', '新しい演奏会'); if (n) { const p = await Playlists.create(n); this.go('playlist:' + p.id); } } }, h('div', null, icon('plus'), '新しい再生リスト')));
     for (const p of Playlists.list()) {
@@ -1632,6 +1663,7 @@ const UI = {
         h('button', { class: 'btn gold', disabled: !playIds.length, onclick: () => Player.playFrom(playIds, 0, p.name, src) }, icon('play'), '再生'),
         h('button', { class: 'btn', disabled: !playIds.length, onclick: () => { Settings.set('shuffle', true); this.syncBar(); Player.playFrom(playIds, Math.floor(Math.random() * playIds.length), p.name, src); } }, icon('shuffle'), 'シャッフル'),
         h('button', { class: 'btn', onclick: () => pickSongs(p) }, icon('plus'), '曲を追加'),
+        h('button', { class: 'btn', title: '音源を含む再生データを1ファイルで保存', onclick: () => Offline.exportPack(p) }, icon('down'), 'ダウンロード（.oct8pl）'),
         h('label', { class: 'inline' }, '要注意曲', explicitSelect(p.explicit, async val => { p.explicit = val; await Playlists.save(p); this.renderPlaylist(); }, true)),
         h('div', { class: 'sp' }),
         h('button', { class: 'btn ghost', onclick: e => menu(e.currentTarget, [
@@ -1640,7 +1672,6 @@ const UI = {
           '-',
           { label: `オフライン保存（${fmtSize(total)}）`, icon: 'pin', fn: () => Offline.saveMany(p.songIds, p.name) },
           { label: 'オフライン保存を解除', icon: 'trash', fn: async () => { for (const id of p.songIds) await Cache.setPinned(id, false); toast('オフライン保存を解除しました'); this.renderPlaylist(); } },
-          { label: '.oct8pl として書き出す…', icon: 'down', fn: () => Offline.exportPack(p) },
           '-',
           { label: 'この再生リストを削除', icon: 'trash', fn: async () => { if (await confirmDlg('再生リストを削除', `「${p.name}」を削除します。曲そのものは消えません。`, '削除', 'danger')) { await Playlists.remove(p.id); this.go('playlists'); } } }
         ]) }, icon('more'), 'その他')));
@@ -1904,15 +1935,38 @@ const Offline = {
     for (const id of ids) { if (Progress.cancelled) break; try { await Cache.bytes(id, { pin: true }); await Cache.setPinned(id, true); } catch (e) { fail++; console.warn(e); } Progress.set(++n); }
     Progress.done(); toast(fail ? `${n - fail} 曲を保存（${fail} 曲失敗）` : `${n} 曲をオフライン保存しました`, !!fail); UI.render();
   },
+  async refetch(ids) { let ok = 0; for (const id of ids) { const m = Lib.get(id); if (!m?.file) continue; try { const u8 = await Remote.fetchSong(m.file, null, m.sha); await Cache.store(id, u8, true, m.sha); Engine.forget(id); ok++; } catch (e) { console.warn('refetch', id, e.message); } } if (ok) toast(`オフライン保存の ${ok} 曲を新しい版に更新しました`); },
+  async collect(ids, title) {
+    const need = ids.filter(id => !Cache.has(id)); const size = need.reduce((a, id) => a + (Lib.get(id)?.size || 0), 0);
+    if (need.length && !(await confirmDlg(title, `書き出しには音源データが必要です。端末にない ${need.length} 曲（約 ${fmtSize(size)}）をダウンロードしてから書き出します。`, '続ける'))) return null;
+    Progress.start('書き出し準備中', ids.length); const files = []; let n = 0, fail = 0;
+    for (const id of ids) { if (Progress.cancelled) { Progress.done(); return null; } try { files.push({ id, u8: await Cache.bytes(id) }); } catch (e) { fail++; } Progress.set(++n); }
+    Progress.done(); if (fail) toast(`${fail} 曲は取得できなかったため除外しました`, true); return files;
+  },
+  fname: s => (s || 'OCT').replace(/[\\/:*?"<>|]/g, '_'),
+  afterExport(blob, name, count) {
+    download(blob, name);
+    dialog({ title: '書き出しました', body: h('div', null, h('p', null, `${name}（${count} 曲・${fmtSize(blob.size)}）を保存しました。`), h('p', null, 'このファイルには音源がすべて含まれています。別の端末やオフライン環境では、アプリの「再生リスト → 読み込む」またはファイルを画面にドロップすると、そのまま再生リストとして取り込めます。')), actions: [{ label: '閉じる', value: null }] });
+  },
   async exportPack(p) {
     const ids = p.songIds.filter(id => Lib.get(id)); if (!ids.length) return toast('曲がありません', true);
-    const need = ids.filter(id => !Cache.has(id)); const size = need.reduce((a, id) => a + (Lib.get(id).size || 0), 0);
-    if (need.length && !(await confirmDlg('再生リストを書き出す', `書き出しには全曲のデータが必要です。未取得の ${need.length} 曲（約 ${fmtSize(size)}）をダウンロードしてから書き出します。`, '続ける'))) return;
-    Progress.start('書き出し準備中', ids.length); const files = []; let n = 0;
-    for (const id of ids) { if (Progress.cancelled) { Progress.done(); return; } try { files.push({ id, u8: await Cache.bytes(id) }); } catch (e) { toast(e.message, true); } Progress.set(++n); }
-    Progress.done(); const out = await Format.buildPack(p.name, p.desc, files);
-    download(new Blob([out], { type: 'application/octet-stream' }), `${p.name.replace(/[\\/:*?"<>|]/g, '_')}.oct8pl`); toast('.oct8pl を書き出しました');
-  }
+    const files = await this.collect(ids, '再生リストを書き出す'); if (!files) return;
+    const blob = await Format.buildPackBlob({ kind: 'playlist', name: p.name, desc: p.desc, playlists: [{ name: p.name, desc: p.desc, songIds: files.map(f => f.id), explicit: p.explicit }] }, files);
+    this.afterExport(blob, this.fname(p.name) + '.oct8pl', files.length);
+  },
+  async exportIds(ids, name) {
+    if (!ids.length) return toast('曲がありません', true);
+    const files = await this.collect(ids, '曲を書き出す'); if (!files) return;
+    const blob = await Format.buildPackBlob({ kind: 'playlist', name, playlists: [{ name, songIds: files.map(f => f.id) }] }, files);
+    this.afterExport(blob, this.fname(name) + '.oct8pl', files.length);
+  },
+  async exportBackup() {
+    const have = Lib.list().filter(m => Cache.has(m.id)).map(m => m.id), all = Lib.list().map(m => m.id);
+    const r = await dialog({ title: 'バックアップを書き出す', body: h('p', null, `再生リスト・お気に入りと、音源データをまとめて1つの .oct8pl に書き出します。端末に保存済みの曲は ${have.length} 曲、演目全体は ${all.length} 曲です。`), actions: [{ label: 'キャンセル', value: null }, { label: `端末にある ${have.length} 曲`, value: 'have' }, { label: `全 ${all.length} 曲（不足分を取得）`, value: 'all', cls: 'gold' }] });
+    if (!r) return; const files = await this.collect(r === 'all' ? all : have, 'バックアップ'); if (!files) return;
+    const blob = await Format.buildPackBlob({ kind: 'backup', name: 'OCT Medley バックアップ', playlists: Playlists.list().map(p => ({ name: p.name, desc: p.desc, songIds: p.songIds, explicit: p.explicit })), favs: [...State.favs] }, files);
+    this.afterExport(blob, `OCT-backup-${new Date().toISOString().slice(0, 10)}.oct8pl`, files.length);
+  },
 };
 
 /* ---------------- studio (楽曲登録) ---------------- */
@@ -2415,6 +2469,7 @@ const SettingsView = {
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('h3', null, 'Storage', h('small', null, '保存容量'))),
         row('一時キャッシュの上限', 'オフライン保存した曲は含みません', sel('cacheMB', [[100, '100 MB'], [300, '300 MB'], [600, '600 MB'], [1000, '1 GB'], [3000, '3 GB']], () => Cache.evict().then(() => this.update()))),
         row('使用量', null, h('span', { id: 'set-usage', class: 'jp' })),
+        row('バックアップ', '再生リスト・お気に入り・音源を1つの .oct8pl に。別の端末やオフラインでもそのまま取り込めます', h('button', { class: 'btn', onclick: () => Offline.exportBackup() }, icon('down'), '書き出す'), h('button', { class: 'btn', onclick: () => $('#filepick').click() }, icon('upload'), '読み込む')),
         row('', null, h('button', { class: 'btn', onclick: async () => { await Cache.clearTemp(); this.update(); toast('一時キャッシュを消去しました'); } }, '一時キャッシュを消去'), h('button', { class: 'btn danger', onclick: async () => { if (await confirmDlg('すべて消去', 'オフライン保存した曲・ローカル曲のデータも含め、端末内の音声データをすべて消去します。', '消去', 'danger')) { await Cache.clearAll(); for (const sg of Lib.list().filter(x => x.source === 'local')) await Lib.remove(sg.id); this.update(); UI.render(); toast('消去しました'); } } }, 'すべての音声データを消去'))),
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('h3', null, 'Appearance', h('small', null, '表示'))),
         row('背景のスペクトラム表示', '再生中に背景でうっすら揺れるグラフ', sw('eq'), h('input', { type: 'range', class: 'rng', min: 0, max: 100, value: s.eqIntensity * 100, style: { width: '160px' }, oninput: e => { Settings.s.eqIntensity = e.target.value / 100; setP(e.target); }, onchange: () => Settings.save() })),
