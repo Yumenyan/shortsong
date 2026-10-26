@@ -634,7 +634,7 @@ const DB = {
 
 /* ---------------- settings & state ---------------- */
 const DEFAULTS = {
-  remoteMode: 'github', repo: 'Yumenyan/song_data', branch: 'main', folder: 'songs', catalog: 'catalog.oct8c', customBase: '', passphrase: '',
+  remoteMode: 'pages', pagesUrl: '', exportCatalog: false, settingsVer: 2, repo: 'Yumenyan/song_data', branch: 'main', folder: 'songs', catalog: 'catalog.oct8c', customBase: '', passphrase: '',
   tailTrim: 'tail', headTrim: true, normalize: true, transition: 'gapless', crossfade: 2, gap: 1, prefetch: 3,
   explicit: 'exclude', cacheMB: 300, eq: true, eqIntensity: 0.5, watermark: true,
   modRate: 1, modSemi: 0, modLinked: false, eqOn: true, eqPreset: 'flat', eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], reverb: 0,
@@ -655,7 +655,7 @@ const EQ_PRESETS = {
 };
 const Settings = {
   s: { ...DEFAULTS },
-  async load() { const v = await DB.get('kv', 'settings'); if (v) Object.assign(this.s, v); if (!Array.isArray(this.s.eqGains) || this.s.eqGains.length !== EQ_FREQS.length) this.s.eqGains = EQ_FREQS.map(() => 0); else this.s.eqGains = this.s.eqGains.slice(); },
+  async load() { const v = await DB.get('kv', 'settings'); if (v) { Object.assign(this.s, v); if (!(v.settingsVer >= 2)) { if (this.s.remoteMode === 'github') this.s.remoteMode = 'pages'; this.s.settingsVer = 2; } } if (!Array.isArray(this.s.eqGains) || this.s.eqGains.length !== EQ_FREQS.length) this.s.eqGains = EQ_FREQS.map(() => 0); else this.s.eqGains = this.s.eqGains.slice(); },
   save() { return DB.put('kv', { ...this.s }, 'settings'); },
   set(k, v) { this.s[k] = v; this.save(); }
 };
@@ -818,34 +818,35 @@ const thumbOf = m => m?.thumbS || fallbackArt(m);
 
 /* ---------------- library & remote ---------------- */
 const Remote = {
-  repoParts() { const [o, r] = (Settings.s.repo || '').split('/').map(x => x.trim()); return { o, r }; },
-  base() {
-    const s = Settings.s;
-    if (s.remoteMode === 'custom') return (s.customBase || '').replace(/\/*$/, '/');
-    const { o, r } = this.repoParts(); return `https://raw.githubusercontent.com/${o}/${r}/${encodeURIComponent(s.branch || 'main')}/`;
-  },
+  activeBase: null,
+  repoParts() { const [o, r] = (Settings.s.repo || '').split('/').map(x => x.trim()); return { o: o || '', r: r || '' }; },
+  pagesBase() { const s = Settings.s; if ((s.pagesUrl || '').trim()) return s.pagesUrl.trim().replace(/\/*$/, '/'); const { o, r } = this.repoParts(); return `https://${o.toLowerCase()}.github.io/${r}/`; },
+  rawBase() { const { o, r } = this.repoParts(); return `https://raw.githubusercontent.com/${o}/${r}/${encodeURIComponent(Settings.s.branch || 'main')}/`; },
+  bases() { const m = Settings.s.remoteMode; if (m === 'custom') return [(Settings.s.customBase || '').replace(/\/*$/, '/')]; if (m === 'github') return [this.rawBase()]; return [this.pagesBase(), this.rawBase()]; },
+  base() { return this.activeBase && this.bases().includes(this.activeBase) ? this.activeBase : this.bases()[0]; },
   folderPath() { const f = (Settings.s.folder || '').replace(/^\/+|\/+$/g, ''); return f ? f + '/' : ''; },
   songUrl(file) { return this.base() + this.folderPath() + encodeURIComponent(file); },
-  catalogUrl() { return this.base() + (Settings.s.catalog || 'catalog.oct8c').replace(/^\/+/, ''); },
+  catalogPath() { return (Settings.s.catalog || 'catalog.oct8c').replace(/^\/+/, ''); },
+  catalogUrl() { return this.base() + this.catalogPath(); },
   apiUrl() { if (Settings.s.remoteMode === 'custom') return null; const { o, r } = this.repoParts(); return `https://api.github.com/repos/${o}/${r}/contents/${(Settings.s.folder || '').replace(/^\/+|\/+$/g, '')}?ref=${encodeURIComponent(Settings.s.branch || 'main')}`; },
-  async fetchCatalog(fresh = false) {
-    // fresh: GitHub API から直接取得（raw の CDN キャッシュ＝最大数分の遅れを回避）
-    if (fresh && Settings.s.remoteMode !== 'custom') {
-      try {
-        const { o, r: rp } = this.repoParts(); const path = (Settings.s.catalog || 'catalog.oct8c').replace(/^\/+/, '');
-        const r = await fetch(`https://api.github.com/repos/${o}/${rp}/contents/${path}?ref=${encodeURIComponent(Settings.s.branch || 'main')}`, { headers: { Accept: 'application/vnd.github.raw' }, cache: 'no-store' });
-        if (r.status === 404 || r.status === 409) { Lib.catalogState = 'none'; return null; }
-        if (r.ok) { Lib.catalogState = 'api'; return await Format.readCatalog(new Uint8Array(await r.arrayBuffer())); }
-      } catch (e) { console.warn('catalog api', e); }
+  async getBin(url, fresh) { try { const r = await fetch(fresh ? url + (url.includes('?') ? '&' : '?') + 't=' + Date.now() : url, { cache: fresh ? 'no-store' : 'no-cache' }); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; } catch { return null; } },
+  /* カタログ＋index.json（GitHub Actions が生成）を、候補の配信元から順に探す。APIは使わない */
+  async fetchSite(fresh = false) {
+    for (const base of this.bases()) {
+      const [catB, idxB] = await Promise.all([this.getBin(base + this.catalogPath(), fresh), this.getBin(base + 'index.json', fresh)]);
+      let cat = null, idx = null;
+      if (catB) { try { cat = await Format.readCatalog(catB); } catch (e) { console.warn('catalog', e); } }
+      if (idxB) { try { const j = JSON.parse(TD.decode(idxB)); if (j && Array.isArray(j.files)) idx = j; } catch { } }
+      if (cat || idx) { this.activeBase = base; return { cat, idx, base }; }
     }
-    try { const r = await fetch(this.catalogUrl(), { cache: 'no-cache' }); Lib.catalogState = r.ok ? 'raw' : 'none'; if (!r.ok) return null; return await Format.readCatalog(new Uint8Array(await r.arrayBuffer())); }
-    catch (e) { console.warn('catalog', e); return null; }
+    this.activeBase = null; return { cat: null, idx: null, base: null };
   },
+  /* 最終手段：GitHub API（1時間60回の制限あり） */
   async list() {
     const url = this.apiUrl(); if (!url) return null;
     const r = await fetch(url, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-cache' });
     if (r.status === 404 || r.status === 409) return [];
-    if (!r.ok) throw new Error('GitHub API ' + r.status + (r.status === 403 ? '（取得回数の上限。しばらく待つかカタログを置いてください）' : ''));
+    if (!r.ok) throw new Error('GitHub API ' + r.status + (r.status === 403 ? '（回数制限に達しました。GitHub Pages の利用をおすすめします）' : ''));
     const j = await r.json(); if (!Array.isArray(j)) return [];
     return j.filter(f => f.type === 'file' && /\.oct8$/i.test(f.name)).map(f => ({ file: f.name, sha: f.sha, size: f.size }));
   },
@@ -857,8 +858,8 @@ const Remote = {
     if (u8.length < hd.offL + hd.lenL) { r = await fetch(url, { headers: { Range: `bytes=0-${hd.offL + hd.lenL - 1}` } }); u8 = new Uint8Array(await r.arrayBuffer()); }
     return Format.readLite(u8, hd);
   },
-  async fetchSong(file, onProg) {
-    const r = await fetch(this.songUrl(file)); if (!r.ok) throw new Error(file + ': HTTP ' + r.status);
+  async fetchSong(file, onProg, sha) {
+    const r = await fetch(this.songUrl(file) + (sha ? '?v=' + sha.slice(0, 10) : '')); if (!r.ok) throw new Error(file + ': HTTP ' + r.status);
     const total = +r.headers.get('content-length') || 0;
     if (!r.body || !onProg) return new Uint8Array(await r.arrayBuffer());
     const rd = r.body.getReader(), chunks = []; let got = 0;
@@ -878,7 +879,9 @@ const Lib = {
   async _refresh({ quiet = false, fresh = false } = {}) {
     this.refreshing = true; UI.libStatus('更新中…');
     try {
-      const [cat, listing] = await Promise.all([Remote.fetchCatalog(fresh), Remote.list().catch(e => ({ error: e }))]);
+      const site = await Remote.fetchSite(fresh); const cat = site.cat; this.siteIndex = site.idx; this.catalogState = site.cat ? (site.cat.generator === 'actions' ? 'actions' : 'manual') : 'none';
+      let listing = site.idx ? site.idx.files : null;
+      if (!listing && !cat && Settings.s.remoteMode !== 'custom') listing = await Remote.list().catch(e => ({ error: e }));
       const remoteNow = new Map(); const known = this.list().filter(s => s.source === 'remote');
       if (listing && !listing.error) {
         const catByFile = new Map((cat?.songs || []).map(s => [s.file, s]));
@@ -898,17 +901,23 @@ const Lib = {
         }
       } else if (cat) {
         for (const c of cat.songs) remoteNow.set(c.id, { ...c, source: 'remote' });
-        if (listing?.error && !quiet) toast('一覧APIに接続できないため、カタログのみで更新しました', true);
+
       } else {
         throw listing?.error || new Error('リモートにデータが見つかりません');
       }
       // merge
       const toPut = [], toDel = [];
-      for (const [id, m] of remoteNow) { const ex = this.songs.get(id); if (ex && ex.source === 'local') continue; const rec = { ...m, addedAt: ex?.addedAt || Date.now() }; delete rec.orphan; toPut.push(rec); }
+      for (const [id, m] of remoteNow) {
+        const ex = this.songs.get(id); const fi = State.fileIndex[id];
+        // リモートを正とする：端末内の古いコピー（試聴用に追加した曲・以前の版）は破棄
+        if (fi && (ex?.source === 'local' || (m.sha && fi.sha && fi.sha !== m.sha) || (m.sha && ex?.sha && ex.sha !== m.sha))) { const pin = fi.pinned; await Cache.remove(id); Engine.forget(id); if (pin) (this._repin = this._repin || []).push(id); }
+        const rec = { ...m, source: 'remote', addedAt: ex?.addedAt || Date.now() }; delete rec.orphan; toPut.push(rec);
+      }
       for (const s of known) if (!remoteNow.has(s.id)) { if (State.fileIndex[s.id]?.pinned) { toPut.push({ ...s, orphan: true }); } else toDel.push(s.id); }
       await DB.putMany('songs', toPut); await DB.delMany('songs', toDel);
       toPut.forEach(s => this.songs.set(s.id, s)); toDel.forEach(id => this.songs.delete(id));
       this.lastRefresh = Date.now(); DB.put('kv', this.lastRefresh, 'lastRefresh');
+      if (this._repin?.length) { const ids = this._repin; this._repin = null; setTimeout(() => Offline.saveMany(ids, '更新された曲'), 500); }
       if (!quiet) toast(`演目を更新しました（リモート ${remoteNow.size} 曲）`);
       return true;
     } catch (e) {
@@ -943,7 +952,7 @@ const Lib = {
     const meta = { ...pickLite(lite), source: ex?.source === 'remote' ? 'remote' : 'local', file: ex?.file || name, sha: ex?.sha, size: u8.length, addedAt: ex?.addedAt || Date.now() };
     if (ex?.source === 'remote' && ex.sha) { const sha = await gitBlobSha(u8); if (sha !== ex.sha) meta.source = 'local'; }
     await DB.put('songs', meta); this.songs.set(meta.id, meta);
-    await Cache.store(meta.id, u8, true); Engine.forget(meta.id);
+    await Cache.store(meta.id, u8, true, meta.source === 'remote' ? meta.sha : 'local'); Engine.forget(meta.id);
     return meta;
   },
   async remove(id) { await DB.del('songs', id); this.songs.delete(id); await Cache.remove(id); UI.refresh(); }
@@ -955,9 +964,9 @@ const Cache = {
   usage() { let pinned = 0, temp = 0; for (const v of Object.values(State.fileIndex)) v.pinned ? pinned += v.size : temp += v.size; return { pinned, temp }; },
   has(id) { return !!State.fileIndex[id]; },
   isPinned(id) { return !!State.fileIndex[id]?.pinned; },
-  async store(id, u8, pinned = false) {
+  async store(id, u8, pinned = false, sha) {
     await DB.put('files', { id, bytes: u8 });
-    const prev = State.fileIndex[id]; State.fileIndex[id] = { size: u8.length, pinned: pinned || !!prev?.pinned, used: Date.now() };
+    const prev = State.fileIndex[id]; State.fileIndex[id] = { size: u8.length, pinned: pinned || !!prev?.pinned, used: Date.now(), sha: sha || Lib.get(id)?.sha };
     await this.evict(); State.saveIndex();
   },
   async evict() {
@@ -978,7 +987,7 @@ const Cache = {
     const m = Lib.get(id); if (!m) throw new Error('曲が見つかりません');
     if (m.source !== 'remote' || m.orphan) throw new Error('「' + (m.title || id) + '」のデータが端末にありません');
     if (this.inflight.has(id)) { const u8 = await this.inflight.get(id); if (pin) await this.setPinned(id, true); return u8; }
-    const p = (async () => { const u8 = await Remote.fetchSong(m.file, onProg); await this.store(id, u8, pin); return u8; })();
+    const p = (async () => { const u8 = await Remote.fetchSong(m.file, onProg, m.sha); await this.store(id, u8, pin, m.sha); return u8; })();
     this.inflight.set(id, p); try { return await p; } finally { this.inflight.delete(id); }
   },
   async clearTemp() { const del = Object.entries(State.fileIndex).filter(([, v]) => !v.pinned).map(([id]) => id); del.forEach(id => delete State.fileIndex[id]); await DB.delMany('files', del); State.saveIndex(); },
@@ -1916,16 +1925,16 @@ const Studio = {
         h('div', { class: 'chips' }, h('button', { class: 'chip on', id: 'st-mode-1', onclick: () => this.mode(1) }, '1曲ずつ'), h('button', { class: 'chip', id: 'st-mode-n', onclick: () => this.mode(2) }, 'まとめて登録'), h('button', { class: 'chip', id: 'st-mode-e', onclick: () => this.mode(3) }, '既存の曲を修正'))),
       // I
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('span', { class: 'num' }, 'I.'), h('h3', null, 'Latest data', h('small', null, '最新データの取得')), h('span', { class: 'sp' }), h('button', { class: 'btn', onclick: () => this.syncLatest(false) }, icon('cloud'), '今すぐ取得')),
-        h('p', { class: 'lede', id: 'st-libinfo' }), h('p', { class: 'note-x', id: 'st-sync' }), h('p', { class: 'note-x', id: 'st-target' }), h('p', { class: 'note-x' }, '楽曲登録を開くたびに（1分以上あけて）GitHubから最新のカタログを自動取得します。カタログを書き出す直前にも、もう一度最新を取得してから組み立てます。')),
+        h('p', { class: 'lede', id: 'st-libinfo' }), h('p', { class: 'note-x', id: 'st-sync' }), h('div', { id: 'st-issues' }), h('p', { class: 'note-x', id: 'st-target' }), h('p', { class: 'note-x' }, '楽曲登録を開くたびに（1分以上あけて）最新のカタログを自動取得し、タイトル・作曲者の空欄や番号・IDの重複を点検します。')),
       h('div', { id: 'st-single' }, this.buildSingle()),
       h('div', { id: 'st-batch', class: 'hidden' }, this.buildBatch()),
       h('div', { id: 'st-edit', class: 'hidden' }, this.buildEditPick()),
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('span', { class: 'num' }, '✦'), h('h3', null, 'How it works', h('small', null, '仕組み'))),
         h('ol', { class: 'steps' },
-          h('li', null, '「GitHubから取得」で最新の演目を読み込み、番号やIDの重複を避けます。'),
+          h('li', null, '楽曲登録を開くと最新の演目が自動で読み込まれ、番号やIDの重複を避けられます。'),
           h('li', null, '音源を登録して情報を入力し、', h('span', { class: 'code' }, '.oct8'), ' を書き出します（音声・サムネイル・情報が暗号化された1ファイル）。'),
-          h('li', null, 'リポジトリの ', h('span', { class: 'code', id: 'st-folder' }, 'songs/'), ' に置いてコミットすると、アプリの「リモートから更新」で認識されます。'),
-          h('li', null, '任意：書き出した ', h('span', { class: 'code' }, 'catalog.oct8c'), ' をリポジトリ直下に置くと、曲数が多くても読み込みが速くなり、GitHub APIの回数制限時もカタログで動きます。')),
+          h('li', null, 'リポジトリの ', h('span', { class: 'code', id: 'st-folder' }, 'songs/'), ' に置いてコミットするだけです。GitHub Actions が全曲から ', h('span', { class: 'code' }, 'catalog.oct8c'), ' を毎回作り直して GitHub Pages に公開します（1〜2分）。'),
+          h('li', null, '情報を直したいときは「既存の曲を修正」で同じIDのまま書き出して置き換え、消したいときはファイルを削除するだけで、カタログからも自動で消えます。')),
         h('p', { class: 'note-x' }, '※ 暗号化はアプリに内蔵した鍵で行う「難読化」です。カジュアルな抜き出しは防げますが、技術的に解析されれば復元は可能です。設定で独自の暗号キーに変更できます（再生側も同じキーが必要）。'))
     );
     this.updateLibInfo();
@@ -2014,7 +2023,7 @@ const Studio = {
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('span', { class: 'num' }, 'V.'), h('h3', null, 'Export', h('small', null, '書き出し'))),
         h('div', { class: 'toolbar', style: { marginTop: 0 } },
           h('button', { class: 'btn gold', onclick: () => this.exportSingle(false) }, icon('down'), '.oct8 を書き出す'),
-          h('button', { class: 'btn', onclick: () => this.exportSingle(true) }, icon('down'), '.oct8 ＋ catalog.oct8c を書き出す'),
+          h('button', { class: 'btn ghost', title: 'GitHub Actions を使わない場合のみ', onclick: () => this.exportSingle(true) }, icon('down'), '＋ catalog.oct8c も（Actions不使用時）'),
           h('button', { class: 'btn ghost', onclick: () => this.exportSingle(false, true) }, icon('plus'), 'この端末のライブラリに追加して試聴')),
         h('p', { class: 'note-x', id: 'sg-out' }))
     );
@@ -2224,6 +2233,7 @@ const Studio = {
       if (addLocal) { await Lib.addLocalSong(u8, file); toast('この端末のライブラリに追加しました'); UI.render(); return; }
       download(new Blob([u8], { type: 'application/octet-stream' }), file);
       let msg = `${file}（${fmtSize(u8.length)}）を書き出しました。リポジトリの ${Remote.folderPath() || '直下'} に置いてください。`;
+      if (this.st.editingId && this.st.editingId !== lite.id) { const old = Lib.get(this.st.editingId)?.file || this.st.editingId + '.oct8'; msg += ` ⚠ IDを「${this.st.editingId}」から変更したため、リポジトリの旧ファイル ${old} を削除してください（削除すればカタログからも消えます）。`; }
       if (withCatalog) { if (!(await this.ensureLatest())) return; const cat = await this.catalogWith([{ ...pickLite(lite), file, sha: await gitBlobSha(u8), size: u8.length }]); download(new Blob([cat], { type: 'application/octet-stream' }), (Settings.s.catalog || 'catalog.oct8c').split('/').pop()); msg += ' catalog.oct8c はリポジトリ直下（設定のカタログ位置）へ置き換えてください。'; }
       $('#sg-out').textContent = msg; toast('書き出しました');
     } catch (e) { toast(e.message, true); }
@@ -2235,10 +2245,20 @@ const Studio = {
     this.syncing = (async () => {
       const ok = await Lib.refreshRemote({ quiet, fresh: true });
       if (ok) this.syncedAt = Date.now();
-      const e = $('#st-sync'); if (e) { e.textContent = ok ? `✓ 最新のカタログを取得しました（${new Date().toLocaleTimeString('ja-JP')}${Lib.catalogState === 'none' ? '・リポジトリにカタログはまだありません' : ''}）` : '⚠ 最新データを取得できませんでした。通信状態を確認してください'; e.style.color = ok ? 'var(--gold-b)' : 'var(--warn)'; }
+      const e = $('#st-sync'); if (e) { const ix = Lib.siteIndex; e.textContent = ok ? `✓ 最新のデータを取得しました（${new Date().toLocaleTimeString('ja-JP')}）` + (ix?.updated ? ` · サイトの最終更新 ${new Date(ix.updated).toLocaleString('ja-JP')}` : Lib.catalogState === 'manual' ? ' · 手動アップロードのカタログを使用中' : ' · GitHub Actions のカタログはまだありません') : '⚠ 最新データを取得できませんでした。通信状態を確認してください'; e.style.color = ok ? 'var(--gold-b)' : 'var(--warn)'; }
+      this.drawIssues();
       this.updateLibInfo(); return ok;
     })();
     try { return await this.syncing; } finally { this.syncing = null; }
+  },
+  drawIssues() {
+    const box = $('#st-issues'); if (!box) return; const issues = [...(Lib.siteIndex?.issues || [])];
+    // アプリ側でも点検（Actions を使っていない場合用）
+    const byNo = new Map(); for (const m of Lib.list().filter(x => x.source === 'remote')) { if (!m.siteChecked) { if (!(m.title || '').trim()) issues.push({ id: m.id, file: m.file, msg: 'タイトルが空です' }); if (!(m.composer || '').trim()) issues.push({ id: m.id, file: m.file, msg: '作曲者が空です' }); } if (m.no != null) { if (byNo.has(m.no)) issues.push({ id: m.id, file: m.file, msg: `番号 ${m.no} が「${byNo.get(m.no)}」と重複` }); else byNo.set(m.no, m.title); } }
+    const uniq = [...new Map(issues.map(i => [i.file + i.msg, i])).values()];
+    if (!uniq.length) { box.replaceChildren(); return; }
+    box.replaceChildren(h('div', { class: 'lbl jp', style: { marginTop: '10px', color: 'var(--warn)' } }, `点検で ${uniq.length} 件の問題が見つかりました`),
+      ...uniq.slice(0, 50).map(i => { const m = i.id ? Lib.get(i.id) : Lib.list().find(x => x.file === i.file); return h('div', { class: 'pickrow', style: { cursor: m ? 'pointer' : 'default' }, onclick: () => m && this.openExisting(m.id) }, h('span', { class: 'tag-x' }, '要確認'), h('span', null, i.file), h('span', { class: 'muted' }, i.msg), m ? h('span', { class: 'muted', style: { marginLeft: 'auto', fontSize: '12.5px' } }, '修正する →') : null); }));
   },
   async ensureLatest() {
     const ok = await this.syncLatest(true);
@@ -2278,7 +2298,7 @@ const Studio = {
         h('div', { class: 'f' }, h('span', { class: 'lbl jp' }, '開始番号'), h('input', { class: 'field', id: 'bt-no', type: 'number', min: 0 })),
         h('div', { class: 'f' }, h('span', { class: 'lbl jp' }, 'ファイル名の番号を使う'), h('label', { class: 'inline', style: { marginTop: '6px' } }, h('span', { class: 'switch' }, h('input', { type: 'checkbox', id: 'bt-fnno', checked: true }), h('span')), '「012_タイトル」形式なら番号として採用'))),
       h('div', { id: 'bt-table' }),
-      h('div', { class: 'toolbar' }, h('button', { class: 'btn gold', onclick: () => this.exportBatch() }, icon('down'), 'まとめて書き出す（.zip：songs/ ＋ catalog）'), h('button', { class: 'btn ghost', onclick: () => this.exportBatch(true) }, icon('plus'), 'この端末のライブラリに追加'), h('span', { class: 'muted jp', id: 'bt-stat', style: { fontSize: '13px' } })));
+      h('div', { class: 'toolbar' }, h('button', { class: 'btn gold', onclick: () => this.exportBatch() }, icon('down'), 'まとめて書き出す（.zip）'), h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: Settings.s.exportCatalog, style: { accentColor: 'var(--gold)' }, onchange: e => Settings.set('exportCatalog', e.target.checked) }), 'catalog も同梱（Actions不使用時）'), h('button', { class: 'btn ghost', onclick: () => this.exportBatch(true) }, icon('plus'), 'この端末のライブラリに追加'), h('span', { class: 'muted jp', id: 'bt-stat', style: { fontSize: '13px' } })));
   },
   async addBatch(files) {
     Engine.init(); const startNo = +$('#bt-no').value || this.nextNo || 1; const useFn = $('#bt-fnno').checked;
@@ -2333,7 +2353,7 @@ const Studio = {
     this.reset(); this.mode(2); this.drawBatch(); toast(`「${b.title}」の編集を反映しました`);
   },
   async exportBatch(addLocal = false) {
-    if (!addLocal && !(await this.ensureLatest())) return;
+    if (!addLocal && Settings.s.exportCatalog && !(await this.ensureLatest())) return;
     const ready = this.batch.filter(b => b.an); if (!ready.length) return toast('解析済みの曲がありません', true);
     if (this.batchRunning) toast('解析中の曲は含まれません', false);
     const compAll = $('#bt-comp').value.trim(); const files = [], entries = []; Progress.start('書き出し中', ready.length); let n = 0;
@@ -2347,7 +2367,7 @@ const Studio = {
     }
     Progress.done();
     if (addLocal) { toast(`${ready.length} 曲をこの端末に追加しました`); UI.render(); return; }
-    files.push({ name: (Settings.s.catalog || 'catalog.oct8c'), data: await this.catalogWith(entries) });
+    if (Settings.s.exportCatalog) files.push({ name: (Settings.s.catalog || 'catalog.oct8c'), data: await this.catalogWith(entries) });
     download(makeZip(files), `oct-songs-${new Date().toISOString().slice(0, 10)}.zip`);
     toast(`${ready.length} 曲を zip で書き出しました。中身をリポジトリにそのまま展開してください`, false, 6000);
   }
@@ -2371,13 +2391,14 @@ const SettingsView = {
     v.append(
       h('div', { class: 'hero' }, h('div', { class: 'grow' }, h('p', { class: 'eyebrow' }, 'Preferences'), h('h1', { class: 'title' }, 'Settings', h('span', { class: 'jp' }, '設定')))),
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('h3', null, 'Remote', h('small', null, 'データ取得元'))),
-        row('取得方式', 'GitHub：フォルダ一覧を自動検出／カスタム：任意のURLにある catalog のみ', sel('remoteMode', [['github', 'GitHub リポジトリ'], ['custom', 'カスタムURL']], () => this.update())),
+        row('取得方式', 'GitHub Pages（推奨）：回数制限なし。GitHub Actions が生成するカタログを読みます', sel('remoteMode', [['pages', 'GitHub Pages（推奨）'], ['github', 'GitHub（raw＋API・回数制限あり）'], ['custom', 'カスタムURL']], () => { Remote.activeBase = null; this.update(); })),
         h('div', { id: 'set-gh' },
           row('リポジトリ', 'owner/repo（公開リポジトリ）', txt('repo', 'Yumenyan/song_data')),
           row('ブランチ', null, txt('branch', 'main', '160px')),
-          row('曲フォルダ', 'このフォルダの .oct8 を自動で認識します', txt('folder', 'songs', '160px'))),
+          row('曲フォルダ', 'このフォルダの .oct8 を自動で認識します', txt('folder', 'songs', '160px')),
+          h('div', { id: 'set-pages' }, row('Pages の URL', '空欄なら https://（ユーザー名）.github.io/（リポジトリ名）/ を使います。Pages が未公開の間は GitHub から直接読みます', txt('pagesUrl', 'https://yumenyan.github.io/song_data/', '360px')))),
         h('div', { id: 'set-custom' }, row('ベースURL', '例：https://example.com/oct/（CORS許可が必要）', txt('customBase', 'https://…', '360px'))),
-        row('カタログのパス', 'ベースURLからの相対パス（任意・高速化用）', txt('catalog', 'catalog.oct8c', '200px')),
+        row('カタログのパス', 'ベースURLからの相対パス', txt('catalog', 'catalog.oct8c', '200px')),
         row('暗号キー', '空欄なら内蔵キー。変更すると登録・再生の両方で同じキーが必要です', h('input', { class: 'field', type: 'password', value: s.passphrase, placeholder: '（内蔵キー）', style: { width: '260px' }, onchange: e => { Settings.set('passphrase', e.target.value); Engine.decoded.clear(); } })),
         row('', null, h('button', { class: 'btn gold', onclick: () => Lib.refreshRemote() }, icon('cloud'), '保存して再読み込み'), h('span', { class: 'muted jp', id: 'set-url', style: { fontSize: '12.5px' } }))),
       h('div', { class: 'panel' }, h('div', { class: 'panel-h' }, h('h3', null, 'Playback', h('small', null, '再生'))),
@@ -2405,10 +2426,10 @@ const SettingsView = {
     $$('#v-settings input[type=range]').forEach(setP); this.update();
   },
   update() {
-    const s = Settings.s; $('#set-gh').classList.toggle('hidden', s.remoteMode !== 'github'); $('#set-custom').classList.toggle('hidden', s.remoteMode !== 'custom');
+    const s = Settings.s; $('#set-gh').classList.toggle('hidden', s.remoteMode === 'custom'); $('#set-custom').classList.toggle('hidden', s.remoteMode !== 'custom');
     $('#set-xf').classList.toggle('hidden', s.transition !== 'crossfade'); $('#set-gap').classList.toggle('hidden', s.transition !== 'gap');
     const u = Cache.usage(); $('#set-usage').textContent = `オフライン保存 ${fmtSize(u.pinned)} · 一時キャッシュ ${fmtSize(u.temp)}（${Object.keys(State.fileIndex).length} 曲）`;
-    $('#set-url').textContent = Remote.base() + Remote.folderPath();
+    $('#set-url').textContent = '取得元：' + Remote.bases().join(' → ') + (Remote.activeBase ? `（使用中：${Remote.activeBase}）` : ''); $('#set-pages')?.classList.toggle('hidden', s.remoteMode !== 'pages');
   }
 };
 
@@ -2422,7 +2443,7 @@ const SettingsView = {
   $('#watermark').classList.toggle('off', !Settings.s.watermark);
   EQ.init(); UI.init();
   if (navigator.onLine !== false) Lib.refreshRemote({ quiet: true });
-  window.OCT = { Lib, Player, Queue, Engine, Format, Analyzer, Settings, Cache, Playlists, Studio, UI }; // デバッグ用
+  window.OCT = { Lib, Remote, State, Player, Queue, Engine, Format, Analyzer, Settings, Cache, Playlists, Studio, UI }; // デバッグ用
 })();
 </script>
 </body>
